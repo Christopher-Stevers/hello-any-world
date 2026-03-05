@@ -9,13 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	go_db "hello-all-worlds/go_db/db"
 	go_utils "hello-all-worlds/go_utils"
+	"hello-all-worlds/server/internal/handlers"
 
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/cors"
-
-	"hello-all-worlds/go_server/internal/handlers"
 
 	"github.com/joho/godotenv"
 )
@@ -32,12 +32,12 @@ var (
 func main() {
 	log.Println("Starting Genghis Routing Management API server...")
 
-	// Initialize database connection
-	godotenv.Load("../.env")
+	// Initialize database connection (.env at repo root; run from go_server dir)
+	_ = godotenv.Load("../.env")
 	databaseURL := go_utils.GetEnv("DATABASE_URL_GO", "")
 	ctx := context.Background()
 	var err error
-	dbPool, err = genghisdb.ConnectWithDefaults(ctx, databaseURL)
+	dbPool, err = go_db.ConnectWithDefaults(ctx, databaseURL)
 	if err != nil {
 		log.Fatalf("database connection: %v", err)
 	}

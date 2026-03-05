@@ -3,12 +3,11 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "python_utils"
+name = "mypkg"
 version = "0.1.0"
-description = "Shared utilities for hello-all-worlds Python packages"
-requires-python = ">=3.11"
-dependencies = []
+description = "Local shared package"
+requires-python = ">=3.10"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["python_utils*"]
+include = ["mypkg*"]

@@ -38,9 +38,60 @@ Edit `.env` if needed; defaults point at `localhost` and the ports above (DB nam
 
 | Stack   | Command | DB connection |
 |---------|---------|----------------|
-| **Go**  | `go run ./go_server` | `DATABASE_URL_GO` → `localhost:5433` |
-| **Python** | `python run_python_server.py` | `DATABASE_URL_PYTHON` → `localhost:5434` |
-| **Express** | `npm run express:start` | `DATABASE_URL_EXPRESS` → `localhost:5435` |
-| **Web (Next.js)** | `npm run dev` | `DATABASE_URL_WEB` → `localhost:5436` |
+| **Go**  | `cd go_server && go run .` | `DATABASE_URL_GO` → `localhost:5433` |
+| **Python** | From repo root: `python -m uvicorn pythonapp.api.main:app --reload` → `localhost:5434` |
+| **Express** | `cd express_server && npm run start` | `DATABASE_URL_EXPRESS` → `localhost:5435` |
+| **Web (Next.js)** | `cd web && npm run dev` | `DATABASE_URL_WEB` → `localhost:5436` |
 
-Install deps first where needed: `npm install` (root) for Node/Express/Web; Python/Go per your usual setup.
+**Install dependencies before running:**
+
+From the repo root, install all dependencies at once:
+
+- **Go** — from repo root:
+  ```bash
+  cd go_server && go mod tidy && cd ..
+```
+- **Python** — from repo root:
+```bash
+cd python_server && python -m venv venv && source venv/bin/activate && python -m pip install -e . -e ../python_utils -e ../python_db && cd ..
+# Windows:
+cd python_server; python -m venv venv; .\venv\Scripts\Activate.ps1; python -m pip install -e . -e ..\python_utils -e ..\python_db; cd ..
+```
+  If you see `ImportError: cannot import name 'get_env_bool' from 'python_utils'`, reinstall the local packages from `python_server` with venv active: `python -m pip install -e . -e ..\python_utils -e ..\python_db --force-reinstall --no-deps`.
+- **Node (Express + Web)** — from repo root (install all at once):
+```bash
+
+  npm install --workspaces
+  ```
+  > Requires `workspaces` configured in the root `package.json`. If not yet set up, run individually:
+  > ```bash
+  > cd express_server && npm install && cd ..
+  > cd web && npm install && cd ..
+  > ```
+
+---
+
+## Python FastAPI app (pythonapp.api + libs/mypkg)
+
+The app lives under `pythonapp/api/main.py` and is run as `pythonapp.api.main:app`. The local package under `libs/mypkg` can be installed in editable mode and imported (e.g. `from mypkg.stuff import thing`). No `PYTHONPATH` changes are required.
+
+**Run context:** Start the app from the **repo root** so that the in-repo `python_db` package can be found (either because it is installed in the venv, or via the path hack in code). If you see `ModuleNotFoundError: No module named 'python_db'`, install it: `pip install -e python_db` (from repo root with venv active).
+
+**Setup steps:**
+
+```bash
+python -m venv .venv
+# Windows:
+.\.venv\Scripts\activate
+# Unix:
+# source .venv/bin/activate
+pip install -e libs/mypkg
+pip install -e python_db
+pip install fastapi uvicorn
+```
+
+**Run (from repo root):**
+
+```bash
+python -m uvicorn pythonapp.api.main:app --reload
+```
