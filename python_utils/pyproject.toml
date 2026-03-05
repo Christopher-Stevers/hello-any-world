@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "python_utils"
+version = "0.1.0"
+description = "Shared utilities for hello-all-worlds Python packages"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "python_utils"}
+
+[tool.setuptools.packages.find]
+where = ["python_utils"]
+include = ["python_utils*"]

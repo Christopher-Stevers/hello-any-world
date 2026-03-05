@@ -1,0 +1,14 @@
+{
+  "name": "express_server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "express_utils": "*",
+    "express_db": "*"
+  }
+}
