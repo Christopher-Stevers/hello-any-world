@@ -15,7 +15,6 @@ Mono repo support is being considered for some langs as well.
 | Stack    | Install | Run |
 |----------|--------|-----|
 | **Go**   | From repo root: `go work sync` (or `cd go_server && go mod download`) | `cd go_server && go run .` |
-| **Python** | From repo root: `python -m venv .venv`, then activate venv and `pip install -e python_db -e python_utils` (and `pip install fastapi uvicorn` if using FastAPI) | From repo root with venv active: `python -m uvicorn pythonapp.api.main:app --reload` (or run the app module you use) |
+| **Python** | From repo root: `python -m venv .venv`, then activate venv and `pip install -e python_db -e python_utils` (and `pip install fastapi uvicorn` if using FastAPI) | From repo root with venv active: `python -m uvicorn python_server.api.main:app --reload` (or run the app module you use) |
 | **Express** | From repo root: `npm install` (installs workspace deps including express_server) | `cd express_server && npm run dev` |
 | **Web**  | From repo root: `npm install` | `npm run dev` (runs Next.js from `web/` with root `.env`) |
-

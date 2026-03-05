@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "ts-node --watch index.ts"
+  "dev": "ts-node index.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

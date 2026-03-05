@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
+from webbrowser import get
 
 from fastapi import APIRouter, FastAPI
 
-from db.connection import engine
 from python_db.python_db.database import check_connection
+from python_utils.python_utils.helpers import get_env_bool
 
 # Prefer the in-repo python_db (python_db/python_db) when run without pip install -e.
 
@@ -17,6 +16,8 @@ from python_db.python_db.database import check_connection
 async def lifespan(app: FastAPI):  # noqa: ARG001
     print("Starting lifespan")
     await asyncio.to_thread(check_connection)
+    my_bool = get_env_bool("")
+    print(my_bool)
     yield
     print("Ending lifespan")
 
