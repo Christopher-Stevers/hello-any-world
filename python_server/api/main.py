@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,11 +13,10 @@ from python_db.python_db.database import check_connection
 # Prefer the in-repo python_db (python_db/python_db) when run without pip install -e.
 
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
     print("Starting lifespan")
-    check_connection()
+    await asyncio.to_thread(check_connection)
     yield
     print("Ending lifespan")
 
