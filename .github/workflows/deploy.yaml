@@ -27,7 +27,7 @@ jobs:
       - name: Configure AWS creds (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: arn:aws:iam::764933859140:role/my-monorepo-eks-github-actions
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to ECR
