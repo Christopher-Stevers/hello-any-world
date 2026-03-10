@@ -1,0 +1,50 @@
+{
+  "file_types": {
+    "Helm": [
+      "**/infra/helm/**/templates/**/*.yaml",
+      "**/infra/helm/**/templates/**/*.yml",
+      "**/infra/helm/**/values*.yaml",
+      "**/infra/helm/**/values*.yml",
+      "**/helmfile.d/**/*.yaml",
+      "**/helmfile.d/**/*.yml"
+    ]
+  },
+  "languages": {
+    "YAML": {
+      "format_on_save": "on"
+    },
+    "Helm": {
+      "format_on_save": "off"
+    }
+  },
+  "lsp": {
+    "yaml-language-server": {
+      "settings": {
+        "yaml": {
+          "validate": true,
+          "schemaStore": {
+            "enable": true
+          }
+        }
+      }
+    },
+    "helm-ls": {
+      "settings": {
+        "helm-ls": {
+          "yamlls": {
+            "enabled": false
+          },
+          "diagnostics": {
+            "enabled": true
+          },
+          "completion": {
+            "enabled": true
+          },
+          "hover": {
+            "enabled": true
+          }
+        }
+      }
+    }
+  }
+}
