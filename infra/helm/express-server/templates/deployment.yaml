@@ -26,12 +26,6 @@ spec:
 
           {{- if .Values.envFile.enabled }}
           volumeMounts:
-            {{- if .Values.envFile.config }}
-            - name: envfile-config
-              mountPath: {{ .Values.envFile.mountPath }}
-              subPath: .env
-              readOnly: true
-            {{- end }}
             {{- if .Values.envFile.existingSecretName }}
             - name: envfile-existing-secret
               mountPath: {{ .Values.envFile.mountPath }}
@@ -42,16 +36,16 @@ spec:
               mountPath: {{ .Values.envFile.mountPath }}
               subPath: .env
               readOnly: true
+            {{- else if .Values.envFile.config }}
+            - name: envfile-config
+              mountPath: {{ .Values.envFile.mountPath }}
+              subPath: .env
+              readOnly: true
             {{- end }}
           {{- end }}
 
       {{- if .Values.envFile.enabled }}
       volumes:
-        {{- if .Values.envFile.config }}
-        - name: envfile-config
-          configMap:
-            name: {{ .Values.nameOverride }}-env
-        {{- end }}
         {{- if .Values.envFile.existingSecretName }}
         - name: envfile-existing-secret
           secret:
@@ -60,5 +54,9 @@ spec:
         - name: envfile-secret
           secret:
             secretName: {{ .Values.nameOverride }}-env-secret
+        {{- else if .Values.envFile.config }}
+        - name: envfile-config
+          configMap:
+            name: {{ .Values.nameOverride }}-env
         {{- end }}
       {{- end }}

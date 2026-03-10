@@ -135,5 +135,4 @@ jobs:
             --set image.repository="${{ env.IMAGE_REPO }}" \
             --set image.tag="${{ env.IMAGE_TAG }}" \
             --set service.targetPort=3001 \
-            --set envFile.secret={} \
             --set envFile.existingSecretName=express-server-db

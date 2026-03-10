@@ -1,6 +1,6 @@
 {{- if .Values.envFile.enabled }}
 
-{{- if .Values.envFile.config }}
+{{- if and .Values.envFile.config (not .Values.envFile.existingSecretName) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

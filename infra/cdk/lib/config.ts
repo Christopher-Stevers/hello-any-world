@@ -15,7 +15,7 @@ export const config = {
     backupRetentionDays: 7
   },
   github: {
-    owner: "christopher-stevers",
+    owner: "Christopher-Stevers",
     repo: "hello-any-world",
     branch: "main"
   }
