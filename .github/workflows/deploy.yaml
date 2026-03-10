@@ -24,11 +24,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Debug GitHub context (pre-OIDC)
+        run: |
+          set -euo pipefail
+          echo "event_name=${{ github.event_name }}"
+          echo "repository=${{ github.repository }}"
+          echo "ref=${{ github.ref }}"
+          echo "ref_name=${{ github.ref_name }}"
+          echo "sha=${{ github.sha }}"
+          echo "actor=${{ github.actor }}"
+          echo "workflow=${{ github.workflow }}"
+          echo "run_id=${{ github.run_id }}"
+          echo "run_attempt=${{ github.run_attempt }}"
+
+      - name: Debug OIDC claims
+        uses: actions-oidc-debugger/actions-oidc-debugger@v1
+
       - name: Configure AWS creds (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::764933859140:role/my-monorepo-eks-github-actions
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-${{ github.run_id }}-${{ github.run_attempt }}
+          mask-aws-account-id: false
+          unset-current-credentials: true
+          disable-retry: true
+
+      - name: Debug caller identity (post-OIDC)
+        run: |
+          set -euo pipefail
+          aws --version
+          aws sts get-caller-identity
 
       - name: Login to ECR
         id: login-ecr
