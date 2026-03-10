@@ -1,5 +1,7 @@
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
+import * as path from "node:path";
+import * as fs from "node:fs";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as eks from "aws-cdk-lib/aws-eks";
@@ -137,55 +139,26 @@ DATABASE_URL=${databaseUrlSecret
       namespace: "kube-system",
     });
 
-    albSa.role.addManagedPolicy(
-      iam.ManagedPolicy.fromAwsManagedPolicyName(
-        "AmazonEKSLoadBalancingPolicy"
-      )
+    const albControllerPolicyPath = path.join(
+      process.cwd(),
+      "policies",
+      "aws-load-balancer-controller-iam-policy.json"
     );
 
-    // Explicit ELBv2 and related permissions required by aws-load-balancer-controller
-    albSa.role.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: [
-          "elasticloadbalancing:DescribeLoadBalancers",
-          "elasticloadbalancing:DescribeLoadBalancerAttributes",
-          "elasticloadbalancing:DescribeListeners",
-          "elasticloadbalancing:DescribeListenerCertificates",
-          "elasticloadbalancing:DescribeListenerAttributes",
-          "elasticloadbalancing:DescribeRules",
-          "elasticloadbalancing:DescribeTargetGroups",
-          "elasticloadbalancing:DescribeTargetGroupAttributes",
-          "elasticloadbalancing:DescribeTargetHealth",
-          "elasticloadbalancing:DescribeTags",
-          "ec2:DescribeAccountAttributes",
-          "ec2:DescribeAddresses",
-          "ec2:DescribeAvailabilityZones",
-          "ec2:DescribeInternetGateways",
-          "ec2:DescribeVpcs",
-          "ec2:DescribeVpcPeeringConnections",
-          "ec2:DescribeSubnets",
-          "ec2:DescribeSecurityGroups",
-          "ec2:DescribeInstances",
-          "ec2:DescribeNetworkInterfaces",
-          "ec2:DescribeTags",
-          "ec2:GetCoipPoolUsage",
-          "ec2:DescribeCoipPools",
-          "iam:CreateServiceLinkedRole",
-          "cognito-idp:DescribeUserPoolClient",
-          "acm:ListCertificates",
-          "acm:DescribeCertificate",
-          "wafv2:GetWebACL",
-          "wafv2:GetWebACLForResource",
-          "wafv2:AssociateWebACL",
-          "wafv2:DisassociateWebACL",
-          "shield:GetSubscriptionState",
-          "shield:DescribeProtection",
-          "shield:CreateProtection",
-          "shield:DeleteProtection",
-        ],
-        resources: ["*"],
-      })
+    const albControllerPolicyDoc = iam.PolicyDocument.fromJson(
+      JSON.parse(fs.readFileSync(albControllerPolicyPath, "utf8"))
     );
+
+    const albControllerManagedPolicy = new iam.ManagedPolicy(
+      this,
+      "AwsLoadBalancerControllerManagedPolicy",
+      {
+        managedPolicyName: `${cdk.Stack.of(this).stackName}-AWSLoadBalancerController`,
+        document: albControllerPolicyDoc,
+      }
+    );
+
+    albSa.role.addManagedPolicy(albControllerManagedPolicy);
 
     cluster.addHelmChart("AwsLoadBalancerController", {
       chart: "aws-load-balancer-controller",
