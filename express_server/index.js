@@ -12,7 +12,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.get('/', (req, res) => {
-  const db = getDb();
+	const db = getDb();
+
   res.send(`${greet('World')} (db: ${db.status})`);
 });
 
