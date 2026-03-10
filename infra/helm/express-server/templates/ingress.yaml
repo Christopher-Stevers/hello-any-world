@@ -1,15 +1,16 @@
-{{- if .Values.ingress.enabled }}
+
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ .Values.nameOverride }}
   annotations:
     kubernetes.io/ingress.class: alb
-    alb.ingress.kubernetes.io/scheme: {{ .Values.ingress.scheme }}
+    alb.ingress.kubernetes.io/scheme: {{ default "internet-facing" .Values.ingress.scheme }}
     alb.ingress.kubernetes.io/target-type: {{ .Values.ingress.targetType }}
     alb.ingress.kubernetes.io/listen-ports: {{ .Values.ingress.listenPorts | quote }}
     alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.ingress.healthcheckPath }}
 spec:
+  ingressClassName: alb
   rules:
     - http:
         paths:
@@ -20,4 +21,3 @@ spec:
                 name: {{ .Values.nameOverride }}
                 port:
                   number: {{ .Values.service.port }}
-{{- end }}

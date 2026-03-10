@@ -24,39 +24,27 @@ spec:
             - name: PORT
               value: "3001"
 
-          {{- if .Values.envFile.enabled }}
           volumeMounts:
-            {{- if .Values.envFile.existingSecretName }}
             - name: envfile-existing-secret
               mountPath: {{ .Values.envFile.mountPath }}
               subPath: .env
               readOnly: true
-            {{- else if .Values.envFile.secret }}
             - name: envfile-secret
               mountPath: {{ .Values.envFile.mountPath }}
               subPath: .env
               readOnly: true
-            {{- else if .Values.envFile.config }}
             - name: envfile-config
               mountPath: {{ .Values.envFile.mountPath }}
               subPath: .env
               readOnly: true
-            {{- end }}
-          {{- end }}
 
-      {{- if .Values.envFile.enabled }}
       volumes:
-        {{- if .Values.envFile.existingSecretName }}
         - name: envfile-existing-secret
           secret:
             secretName: {{ .Values.envFile.existingSecretName }}
-        {{- else if .Values.envFile.secret }}
         - name: envfile-secret
           secret:
-            secretName: {{ .Values.nameOverride }}-env-secret
-        {{- else if .Values.envFile.config }}
+            secretName: "{{ .Values.nameOverride }}-env-secret"
         - name: envfile-config
           configMap:
-            name: {{ .Values.nameOverride }}-env
-        {{- end }}
-      {{- end }}
+            name: "{{ .Values.nameOverride }}-env"
