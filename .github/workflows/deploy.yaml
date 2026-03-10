@@ -37,8 +37,47 @@ jobs:
           echo "run_id=${{ github.run_id }}"
           echo "run_attempt=${{ github.run_attempt }}"
 
-      - name: Debug OIDC claims
-        uses: actions-oidc-debugger/actions-oidc-debugger@v1
+      - name: Debug OIDC claims (inline)
+        shell: bash
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "OIDC env vars are missing. Ensure permissions.id-token=write is set at workflow/job level."
+            exit 1
+          fi
+
+          RESP="$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")"
+          TOKEN="$(echo "$RESP" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')"
+
+          if [ -z "${TOKEN:-}" ]; then
+            echo "Failed to obtain OIDC token response:"
+            echo "$RESP"
+            exit 1
+          fi
+
+          PAYLOAD_B64="$(echo "$TOKEN" | cut -d '.' -f2)"
+          PAD=$(( (4 - ${#PAYLOAD_B64} % 4) % 4 ))
+          if [ "$PAD" -gt 0 ]; then
+            PAYLOAD_B64="${PAYLOAD_B64}$(printf '=%.0s' $(seq 1 $PAD))"
+          fi
+
+          PAYLOAD_JSON="$(echo "$PAYLOAD_B64" | tr '_-' '/+' | base64 -d 2>/dev/null || true)"
+          if [ -z "${PAYLOAD_JSON:-}" ]; then
+            echo "Failed to decode JWT payload"
+            exit 1
+          fi
+
+          echo "OIDC payload:"
+          echo "$PAYLOAD_JSON"
+
+          echo "Extracted claims:"
+          echo "$PAYLOAD_JSON" | sed -n 's/.*"aud":"\([^"]*\)".*/aud=\1/p'
+          echo "$PAYLOAD_JSON" | sed -n 's/.*"sub":"\([^"]*\)".*/sub=\1/p'
+          echo "$PAYLOAD_JSON" | sed -n 's/.*"iss":"\([^"]*\)".*/iss=\1/p'
 
       - name: Configure AWS creds (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
