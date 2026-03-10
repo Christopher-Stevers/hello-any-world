@@ -1,0 +1,22 @@
+{
+  "name": "infra-cdk",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "synth": "npx cdk synth",
+    "deploy": "npx cdk deploy --all",
+    "diff": "npx cdk diff",
+    "destroy": "npx cdk destroy --all"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.170.0",
+    "constructs": "^10.5.1",
+    "hello-all-worlds": "file:../.."
+  },
+  "devDependencies": {
+    "@aws-cdk/lambda-layer-kubectl-v29": "^2.1.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,74 @@
+name: Deploy to EKS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER_NAME: my-monorepo-eks
+  NAMESPACE: apps
+  RELEASE_NAME: express-server
+  CHART_PATH: infra/helm/express-server
+  ECR_REPO_NAME: hello-express
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS creds (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE_URI="$ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:$IMAGE_TAG"
+
+          docker build \
+            -f express_server/Dockerfile \
+            -t "$IMAGE_URI" \
+            .
+
+          docker push "$IMAGE_URI"
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "IMAGE_REPO=$ECR_REGISTRY/${{ env.ECR_REPO_NAME }}" >> $GITHUB_ENV
+
+      - name: Configure kubectl for EKS
+        run: |
+          set -euo pipefail
+          aws eks update-kubeconfig --name "${{ env.CLUSTER_NAME }}" --region "${{ env.AWS_REGION }}"
+          kubectl get nodes
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm upgrade
+        run: |
+          set -euo pipefail
+
+          helm upgrade --install "${{ env.RELEASE_NAME }}" "${{ env.CHART_PATH }}" \
+            --namespace "${{ env.NAMESPACE }}" --create-namespace \
+            --set image.repository="${{ env.IMAGE_REPO }}" \
+            --set image.tag="${{ env.IMAGE_TAG }}" \
+            --set service.targetPort=3001 \
+            --set envFile.secret={} \
+            --set envFile.existingSecretName=express-server-db

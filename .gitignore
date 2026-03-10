@@ -58,5 +58,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# CDK
+cdk.out/
+
 # Optional: uncomment if you don't commit sqlc-generated Go
 # db/db/*.go

@@ -1,0 +1,30 @@
+nameOverride: express-server
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  port: 80
+  targetPort: 3001
+
+envFile:
+  enabled: true
+  # Non-secret env vars that will be written into /app/.env
+  config:
+    NODE_ENV: production
+  # Secret env vars managed by this chart (optional)
+  secret: {}
+  # Existing Kubernetes Secret name that already contains key ".env" (preferred)
+  existingSecretName: ""
+  mountPath: /app/.env
+
+ingress:
+  enabled: true
+  scheme: internet-facing
+  targetType: ip
+  listenPorts: '[{"HTTP":80}]'
+  healthcheckPath: /
