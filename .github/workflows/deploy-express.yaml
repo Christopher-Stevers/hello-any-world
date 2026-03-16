@@ -1,8 +1,18 @@
-name: Deploy to EKS
+name: Deploy Express to EKS
 
 on:
   push:
     branches: [main]
+    paths:
+      - ".github/workflows/deploy-express.yaml"
+      - "infra/cdk/**"
+      - "infra/helm/express-server/**"
+      - "express_server/**"
+      - "express_db/**"
+      - "express_utils/**"
+      - "package.json"
+      - "package-lock.json"
+      - "planexpress.md"
   workflow_dispatch: {}
 
 permissions:
@@ -16,6 +26,8 @@ env:
   RELEASE_NAME: express-server
   CHART_PATH: infra/helm/express-server
   ECR_REPO_NAME: hello-express
+  CDK_STACK_NAME: EksStack
+  CDK_WORKDIR: infra/cdk
 
 jobs:
   deploy:
@@ -94,6 +106,40 @@ jobs:
           set -euo pipefail
           aws --version
           aws sts get-caller-identity
+
+      - name: Setup Node for CDK
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            infra/cdk/package-lock.json
+
+      - name: Install root dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Install CDK dependencies
+        working-directory: ${{ env.CDK_WORKDIR }}
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Build CDK
+        working-directory: ${{ env.CDK_WORKDIR }}
+        run: |
+          set -euo pipefail
+          npm run build
+
+      - name: Deploy CDK infra (EKS + DB + secrets)
+        working-directory: ${{ env.CDK_WORKDIR }}
+        env:
+          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          npx cdk deploy "${{ env.CDK_STACK_NAME }}" --require-approval never
 
       - name: Login to ECR
         id: login-ecr

@@ -8,6 +8,9 @@ import * as eks from "aws-cdk-lib/aws-eks";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as cr from "aws-cdk-lib/custom-resources";
+import * as lambdaNodejs from "aws-cdk-lib/aws-lambda-nodejs";
 import * as lambdaLayerKubectlV29 from "@aws-cdk/lambda-layer-kubectl-v29";
 import { config } from "./config.js";
 
@@ -53,7 +56,18 @@ export class EksStack extends cdk.Stack {
       "Allow Postgres from EKS cluster security group"
     );
 
-    // Managed DB credentials in Secrets Manager
+    const bootstrapLambdaSg = new ec2.SecurityGroup(this, "BootstrapLambdaSecurityGroup", {
+      vpc,
+      allowAllOutbound: true,
+      description: "Security group for DB bootstrap Lambdas",
+    });
+    dbSg.addIngressRule(
+      bootstrapLambdaSg,
+      ec2.Port.tcp(config.postgres.port),
+      "Allow Postgres from DB bootstrap Lambda security group"
+    );
+
+    // Master/admin credentials for instance bootstrap/admin operations
     const dbCredentialsSecret = new rds.DatabaseSecret(
       this,
       "DbCredentialsSecret",
@@ -62,7 +76,7 @@ export class EksStack extends cdk.Stack {
       }
     );
 
-    // RDS Postgres
+    // RDS Postgres instance (instance-level defaults stay on postgres.*)
     const db = new rds.DatabaseInstance(this, "AppPostgres", {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
@@ -83,19 +97,165 @@ export class EksStack extends cdk.Stack {
       publiclyAccessible: false,
     });
 
-    // Secret consumed by workloads (JSON with DATABASE_URL key)
-    const databaseUrlSecret = new secretsmanager.Secret(this, "DatabaseUrlSecret", {
-      description:
-        "Application database connection string in DATABASE_URL format",
-      secretObjectValue: {
-        DATABASE_URL: cdk.SecretValue.unsafePlainText(
-          `postgresql://${config.postgres.username}:${dbCredentialsSecret.secretValueFromJson(
-            "password"
-          ).unsafeUnwrap()}@${db.dbInstanceEndpointAddress}:${db.dbInstanceEndpointPort}/${config.postgres.dbName}?sslmode=require`
+    // Service-owned Express DB credentials (for express_user)
+    const expressDbCredentialsSecret = new rds.DatabaseSecret(
+      this,
+      "ExpressDbCredentialsSecret",
+      {
+        username: config.postgres.express.username,
+      }
+    );
+
+    // Service-owned Python DB credentials (for python_user)
+    const pythonDbCredentialsSecret = new rds.DatabaseSecret(
+      this,
+      "PythonDbCredentialsSecret",
+      {
+        username: config.postgres.python.username,
+      }
+    );
+
+    // Lambda-backed custom resource: idempotent bootstrap for express_db + express_user grants
+    const expressBootstrapFn = new lambdaNodejs.NodejsFunction(
+      this,
+      "ExpressDbBootstrapFn",
+      {
+        runtime: lambda.Runtime.NODEJS_20_X,
+        entry: path.join(
+          process.cwd(),
+          "lib",
+          "lambda",
+          "express-db-bootstrap.ts"
         ),
-      },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+        handler: "handler",
+        timeout: cdk.Duration.minutes(2),
+        memorySize: 256,
+        vpc,
+        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [bootstrapLambdaSg],
+        bundling: {
+          target: "node20",
+          format: lambdaNodejs.OutputFormat.CJS,
+          minify: true,
+          sourceMap: false,
+          externalModules: ["@aws-sdk/*"],
+          nodeModules: ["pg"],
+        },
+      }
+    );
+
+    // Lambda-backed custom resource: idempotent bootstrap for python_db + python_user grants
+    const pythonBootstrapFn = new lambdaNodejs.NodejsFunction(
+      this,
+      "PythonDbBootstrapFn",
+      {
+        runtime: lambda.Runtime.NODEJS_20_X,
+        entry: path.join(
+          process.cwd(),
+          "lib",
+          "lambda",
+          "python-db-bootstrap.ts"
+        ),
+        handler: "handler",
+        timeout: cdk.Duration.minutes(2),
+        memorySize: 256,
+        vpc,
+        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [bootstrapLambdaSg],
+        bundling: {
+          target: "node20",
+          format: lambdaNodejs.OutputFormat.CJS,
+          minify: true,
+          sourceMap: false,
+          externalModules: ["@aws-sdk/*"],
+          nodeModules: ["pg"],
+        },
+      }
+    );
+
+    dbCredentialsSecret.grantRead(expressBootstrapFn);
+    expressDbCredentialsSecret.grantRead(expressBootstrapFn);
+
+    dbCredentialsSecret.grantRead(pythonBootstrapFn);
+    pythonDbCredentialsSecret.grantRead(pythonBootstrapFn);
+
+    const expressBootstrapProvider = new cr.Provider(this, "ExpressDbBootstrapProvider", {
+      onEventHandler: expressBootstrapFn,
     });
+
+    const pythonBootstrapProvider = new cr.Provider(this, "PythonDbBootstrapProvider", {
+      onEventHandler: pythonBootstrapFn,
+    });
+
+    const expressDbBootstrap = new cdk.CustomResource(this, "ExpressDbBootstrap", {
+      serviceToken: expressBootstrapProvider.serviceToken,
+      properties: {
+        DbHost: db.dbInstanceEndpointAddress,
+        DbPort: db.dbInstanceEndpointPort,
+        AdminSecretArn: dbCredentialsSecret.secretArn,
+        ExpressSecretArn: expressDbCredentialsSecret.secretArn,
+        ExpressDbName: config.postgres.express.dbName,
+        ExpressUsername: config.postgres.express.username,
+      },
+    });
+    expressDbBootstrap.node.addDependency(db);
+    expressDbBootstrap.node.addDependency(expressDbCredentialsSecret);
+
+    const pythonDbBootstrap = new cdk.CustomResource(this, "PythonDbBootstrap", {
+      serviceToken: pythonBootstrapProvider.serviceToken,
+      properties: {
+        DbHost: db.dbInstanceEndpointAddress,
+        DbPort: db.dbInstanceEndpointPort,
+        AdminSecretArn: dbCredentialsSecret.secretArn,
+        PythonSecretArn: pythonDbCredentialsSecret.secretArn,
+        PythonDbName: config.postgres.python.dbName,
+        PythonUsername: config.postgres.python.username,
+      },
+    });
+    pythonDbBootstrap.node.addDependency(db);
+    pythonDbBootstrap.node.addDependency(pythonDbCredentialsSecret);
+
+    // Express-specific app secret containing DATABASE_URL
+    const expressDatabaseUrlSecret = new secretsmanager.Secret(
+      this,
+      "ExpressDatabaseUrlSecret",
+      {
+        description:
+          "Express application database connection string in DATABASE_URL format",
+        secretObjectValue: {
+          DATABASE_URL: cdk.SecretValue.unsafePlainText(
+            `postgresql://${config.postgres.express.username}:${expressDbCredentialsSecret
+              .secretValueFromJson("password")
+              .unsafeUnwrap()}@${db.dbInstanceEndpointAddress}:${
+              db.dbInstanceEndpointPort
+            }/${config.postgres.express.dbName}?sslmode=require`
+          ),
+        },
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
+      }
+    );
+    expressDatabaseUrlSecret.node.addDependency(expressDbBootstrap);
+
+    // Python-specific app secret containing DATABASE_URL
+    const pythonDatabaseUrlSecret = new secretsmanager.Secret(
+      this,
+      "PythonDatabaseUrlSecret",
+      {
+        description:
+          "Python application database connection string in DATABASE_URL format",
+        secretObjectValue: {
+          DATABASE_URL: cdk.SecretValue.unsafePlainText(
+            `postgresql://${config.postgres.python.username}:${pythonDbCredentialsSecret
+              .secretValueFromJson("password")
+              .unsafeUnwrap()}@${db.dbInstanceEndpointAddress}:${
+              db.dbInstanceEndpointPort
+            }/${config.postgres.python.dbName}?sslmode=require`
+          ),
+        },
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
+      }
+    );
+    pythonDatabaseUrlSecret.node.addDependency(pythonDbBootstrap);
 
     // Managed node group
     cluster.addNodegroupCapacity("DefaultNodeGroup", {
@@ -105,33 +265,81 @@ export class EksStack extends cdk.Stack {
       instanceTypes: [new ec2.InstanceType("t3.medium")],
     });
 
-    // Namespace + Kubernetes .env secret in one manifest to guarantee apply order
-    cluster.addManifest("AppsNamespaceAndExpressServerEnvSecret", {
-      apiVersion: "v1",
-      kind: "List",
-      items: [
+    // Namespace + Kubernetes .env secret as separate manifests to avoid kubectl
+    // provider issues with top-level `List` objects.
+    const appsNamespaceManifest = new eks.KubernetesManifest(this, "AppsNamespace", {
+      cluster,
+      overwrite: true,
+      manifest: [
         {
           apiVersion: "v1",
           kind: "Namespace",
           metadata: { name: config.namespace },
         },
-        {
-          apiVersion: "v1",
-          kind: "Secret",
-          metadata: {
-            name: "express-server-db",
-            namespace: config.namespace,
-          },
-          type: "Opaque",
-          stringData: {
-            ".env": `NODE_ENV=production
-DATABASE_URL=${databaseUrlSecret
-              .secretValueFromJson("DATABASE_URL")
-              .unsafeUnwrap()}`,
-          },
-        },
       ],
     });
+
+    const expressServerEnvSecretManifest = new eks.KubernetesManifest(
+      this,
+      "ExpressServerEnvSecret",
+      {
+        cluster,
+        overwrite: true,
+        manifest: [
+          {
+            apiVersion: "v1",
+            kind: "Secret",
+            metadata: {
+              name: config.expressDbSecretName,
+              namespace: config.namespace,
+            },
+            type: "Opaque",
+            stringData: {
+              ".env": `NODE_ENV=production
+DATABASE_URL=${expressDatabaseUrlSecret
+                .secretValueFromJson("DATABASE_URL")
+                .unsafeUnwrap()}
+EXPRESS_DATABASE_URL=${expressDatabaseUrlSecret
+                .secretValueFromJson("DATABASE_URL")
+                .unsafeUnwrap()}`,
+            },
+          },
+        ],
+      }
+    );
+    expressServerEnvSecretManifest.node.addDependency(appsNamespaceManifest);
+    expressServerEnvSecretManifest.node.addDependency(expressDbBootstrap);
+
+    const pythonServerEnvSecretManifest = new eks.KubernetesManifest(
+      this,
+      "PythonServerEnvSecret",
+      {
+        cluster,
+        overwrite: true,
+        manifest: [
+          {
+            apiVersion: "v1",
+            kind: "Secret",
+            metadata: {
+              name: config.pythonDbSecretName,
+              namespace: config.namespace,
+            },
+            type: "Opaque",
+            stringData: {
+              ".env": `NODE_ENV=production
+DATABASE_URL=${pythonDatabaseUrlSecret
+                .secretValueFromJson("DATABASE_URL")
+                .unsafeUnwrap()}
+PYTHON_DATABASE_URL=${pythonDatabaseUrlSecret
+                .secretValueFromJson("DATABASE_URL")
+                .unsafeUnwrap()}`,
+            },
+          },
+        ],
+      }
+    );
+    pythonServerEnvSecretManifest.node.addDependency(appsNamespaceManifest);
+    pythonServerEnvSecretManifest.node.addDependency(pythonDbBootstrap);
 
     // --- AWS Load Balancer Controller ---
     const albSa = cluster.addServiceAccount("AwsLbControllerSA", {
@@ -211,8 +419,9 @@ DATABASE_URL=${databaseUrlSecret
       })
     );
 
-    // Optional: allow CI to read DB URL secret (not required for runtime mount flow, but useful)
-    databaseUrlSecret.grantRead(ghRole);
+    // Optional: allow CI to read DB URL secrets
+    expressDatabaseUrlSecret.grantRead(ghRole);
+    pythonDatabaseUrlSecret.grantRead(ghRole);
 
     // Map GitHub role to Kubernetes RBAC (cluster-admin)
     cluster.awsAuth.addRoleMapping(ghRole, {
@@ -234,17 +443,37 @@ DATABASE_URL=${databaseUrlSecret
     new cdk.CfnOutput(this, "DatabasePort", {
       value: db.dbInstanceEndpointPort,
     });
-    new cdk.CfnOutput(this, "DatabaseName", {
-      value: config.postgres.dbName,
+
+    new cdk.CfnOutput(this, "ExpressDatabaseName", {
+      value: config.postgres.express.dbName,
     });
+    new cdk.CfnOutput(this, "PythonDatabaseName", {
+      value: config.postgres.python.dbName,
+    });
+
     new cdk.CfnOutput(this, "DatabaseCredentialsSecretArn", {
       value: dbCredentialsSecret.secretArn,
     });
-    new cdk.CfnOutput(this, "DatabaseUrlSecretArn", {
-      value: databaseUrlSecret.secretArn,
+
+    new cdk.CfnOutput(this, "ExpressDbCredentialsSecretArn", {
+      value: expressDbCredentialsSecret.secretArn,
     });
-    new cdk.CfnOutput(this, "KubernetesDatabaseSecretName", {
-      value: "express-server-db",
+    new cdk.CfnOutput(this, "PythonDbCredentialsSecretArn", {
+      value: pythonDbCredentialsSecret.secretArn,
+    });
+
+    new cdk.CfnOutput(this, "ExpressDatabaseUrlSecretArn", {
+      value: expressDatabaseUrlSecret.secretArn,
+    });
+    new cdk.CfnOutput(this, "PythonDatabaseUrlSecretArn", {
+      value: pythonDatabaseUrlSecret.secretArn,
+    });
+
+    new cdk.CfnOutput(this, "ExpressKubernetesDatabaseSecretName", {
+      value: config.expressDbSecretName,
+    });
+    new cdk.CfnOutput(this, "PythonKubernetesDatabaseSecretName", {
+      value: config.pythonDbSecretName,
     });
   }
 }

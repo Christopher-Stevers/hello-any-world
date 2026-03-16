@@ -1,0 +1,25 @@
+{{- if and .Values.envFile.enabled (gt (len .Values.envFile.secret) 0) (not .Values.envFile.existingSecretName) }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: "{{ .Values.nameOverride }}-env-secret"
+type: Opaque
+stringData:
+  .env: |
+    {{- range $k, $v := .Values.envFile.secret }}
+    {{ printf "%s=%q" $k $v | nindent 4 }}
+    {{- end }}
+---
+{{- end }}
+
+{{- if and .Values.envFile.enabled (gt (len .Values.envFile.config) 0) (not .Values.envFile.existingSecretName) (eq (len .Values.envFile.secret) 0) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Values.nameOverride }}-env"
+data:
+  .env: |
+    {{- range $k, $v := .Values.envFile.config }}
+    {{ printf "%s=%q" $k $v | nindent 4 }}
+    {{- end }}
+{{- end }}
