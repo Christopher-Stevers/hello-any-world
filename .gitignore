@@ -21,7 +21,7 @@ build/
 .pnp.*
 
 # Go
-bin/
+/bin/
 *.exe
 *.test
 *.out

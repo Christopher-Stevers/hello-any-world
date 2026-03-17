@@ -1,4 +1,4 @@
-name: Deploy to EKS
+name: Deploy to Python to EKS
 
 on:
   push:
