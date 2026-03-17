@@ -1,11 +1,7 @@
 export const config = {
   region: process.env.CDK_DEFAULT_REGION ?? "us-east-1",
   clusterName: "my-monorepo-eks",
-  ecrRepoNames: {
-    express: "hello-express",
-    python: "hello-python",
-    nextjs: "hello-nextjs",
-  },
+  ecrRepoName: "hello-express",
   namespace: "apps",
 	expressDbSecretName: "express-server-db",
 	pythonDbSecretName: "python-server-db",

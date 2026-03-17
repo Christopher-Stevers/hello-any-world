@@ -24,19 +24,9 @@ export class EksStack extends cdk.Stack {
       natGateways: 1,
     });
 
-    // --- ECR repos for deployed apps ---
-    const expressRepo = new ecr.Repository(this, "ExpressEcrRepo", {
-      repositoryName: config.ecrRepoNames.express,
-      imageScanOnPush: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    });
-    const pythonRepo = new ecr.Repository(this, "PythonEcrRepo", {
-      repositoryName: config.ecrRepoNames.python,
-      imageScanOnPush: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    });
-    const nextjsRepo = new ecr.Repository(this, "NextjsEcrRepo", {
-      repositoryName: config.ecrRepoNames.nextjs,
+    // --- ECR repo for deployed apps ---
+    const appRepo = new ecr.Repository(this, "AppEcrRepo", {
+      repositoryName: config.ecrRepoName,
       imageScanOnPush: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
@@ -527,10 +517,8 @@ NEXTJS_DATABASE_URL=${nextjsDatabaseUrlSecret
       ),
     });
 
-    // ECR push/pull for all app repos deployed from GitHub Actions
-    expressRepo.grantPullPush(ghRole);
-    pythonRepo.grantPullPush(ghRole);
-    nextjsRepo.grantPullPush(ghRole);
+    // ECR push/pull for app repo deployed from GitHub Actions
+    appRepo.grantPullPush(ghRole);
 
     // Allow describe cluster (needed for aws eks update-kubeconfig token flow)
     ghRole.addToPolicy(
@@ -578,14 +566,8 @@ NEXTJS_DATABASE_URL=${nextjsDatabaseUrlSecret
 
     // --- Outputs ---
     new cdk.CfnOutput(this, "ClusterName", { value: config.clusterName });
-    new cdk.CfnOutput(this, "ExpressEcrRepoUri", {
-      value: expressRepo.repositoryUri,
-    });
-    new cdk.CfnOutput(this, "PythonEcrRepoUri", {
-      value: pythonRepo.repositoryUri,
-    });
-    new cdk.CfnOutput(this, "NextjsEcrRepoUri", {
-      value: nextjsRepo.repositoryUri,
+    new cdk.CfnOutput(this, "AppEcrRepoUri", {
+      value: appRepo.repositoryUri,
     });
     new cdk.CfnOutput(this, "GitHubRoleArn", { value: ghRole.roleArn });
     new cdk.CfnOutput(this, "Namespace", { value: config.namespace });
