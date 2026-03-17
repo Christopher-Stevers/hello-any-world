@@ -28,6 +28,8 @@ env:
   CHART_PATH: infra/helm/nextjs-server
   ECR_REPO_NAME: hello-express
   DB_URL_SECRET_OUTPUT_KEY: NextJsDatabaseUrlSecretArn
+  AUTH_SECRET_OUTPUT_KEY: NextJsAuthSecretArn
+  AUTH_SECRET_FALLBACK_NAME: nextjs-auth-secret
   K8S_ENV_SECRET_NAME: nextjs-server-db
   APP_DATABASE_URL_KEY: NEXTJS_DATABASE_URL
 
@@ -145,27 +147,81 @@ jobs:
         run: |
           set -euo pipefail
 
-          SECRET_ARN="$(aws cloudformation describe-stacks \
+          DB_SECRET_ARN="$(aws cloudformation describe-stacks \
             --stack-name "${{ env.CFN_STACK_NAME }}" \
             --query "Stacks[0].Outputs[?OutputKey=='${{ env.DB_URL_SECRET_OUTPUT_KEY }}'].OutputValue | [0]" \
             --output text)"
 
-          if [ -z "${SECRET_ARN}" ] || [ "${SECRET_ARN}" = "None" ]; then
+          if [ -z "${DB_SECRET_ARN}" ] || [ "${DB_SECRET_ARN}" = "None" ]; then
             echo "Could not resolve secret ARN from CloudFormation output key: ${{ env.DB_URL_SECRET_OUTPUT_KEY }}"
             exit 1
           fi
 
+          AUTH_SECRET_ARN="$(aws cloudformation describe-stacks \
+            --stack-name "${{ env.CFN_STACK_NAME }}" \
+            --query "Stacks[0].Outputs[?OutputKey=='${{ env.AUTH_SECRET_OUTPUT_KEY }}'].OutputValue | [0]" \
+            --output text)"
+
           DB_URL="$(aws secretsmanager get-secret-value \
-            --secret-id "${SECRET_ARN}" \
+            --secret-id "${DB_SECRET_ARN}" \
             --query SecretString \
             --output text | python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["DATABASE_URL"])')"
 
           if [ -z "${DB_URL}" ]; then
-            echo "DATABASE_URL is empty in secret: ${SECRET_ARN}"
+            echo "DATABASE_URL is empty in secret: ${DB_SECRET_ARN}"
             exit 1
           fi
 
-          ENV_FILE_CONTENT="$(printf 'NODE_ENV=production\nDATABASE_URL=%s\n%s=%s' "${DB_URL}" "${{ env.APP_DATABASE_URL_KEY }}" "${DB_URL}")"
+          FALLBACK_SECRET_NAME="${{ env.CFN_STACK_NAME }}-${{ env.AUTH_SECRET_FALLBACK_NAME }}"
+
+          if [ -z "${AUTH_SECRET_ARN}" ] || [ "${AUTH_SECRET_ARN}" = "None" ]; then
+            echo "CloudFormation output missing for AUTH secret. Falling back to named secret: ${FALLBACK_SECRET_NAME}"
+            if aws secretsmanager describe-secret --secret-id "${FALLBACK_SECRET_NAME}" >/dev/null 2>&1; then
+              AUTH_SECRET_ARN="$(aws secretsmanager describe-secret --secret-id "${FALLBACK_SECRET_NAME}" --query ARN --output text)"
+            else
+              AUTH_SECRET_ARN="$(aws secretsmanager create-secret \
+                --name "${FALLBACK_SECRET_NAME}" \
+                --description "Auto-generated Next.js AUTH_SECRET for ${FALLBACK_SECRET_NAME}" \
+                --secret-string "{\"AUTH_SECRET\":\"$(python3 -c 'import secrets; print(secrets.token_urlsafe(64))')\"}" \
+                --query ARN \
+                --output text)"
+            fi
+          fi
+
+          AUTH_SECRET_JSON="$(aws secretsmanager get-secret-value \
+            --secret-id "${AUTH_SECRET_ARN}" \
+            --query SecretString \
+            --output text 2>/dev/null || true)"
+
+          if [ -z "${AUTH_SECRET_JSON}" ] || [ "${AUTH_SECRET_JSON}" = "None" ]; then
+            echo "AUTH secret ARN is unreadable/missing. Falling back to named secret: ${FALLBACK_SECRET_NAME}"
+            if aws secretsmanager describe-secret --secret-id "${FALLBACK_SECRET_NAME}" >/dev/null 2>&1; then
+              AUTH_SECRET_ARN="$(aws secretsmanager describe-secret --secret-id "${FALLBACK_SECRET_NAME}" --query ARN --output text)"
+            else
+              AUTH_SECRET_ARN="$(aws secretsmanager create-secret \
+                --name "${FALLBACK_SECRET_NAME}" \
+                --description "Auto-generated Next.js AUTH_SECRET for ${FALLBACK_SECRET_NAME}" \
+                --secret-string "{\"AUTH_SECRET\":\"$(python3 -c 'import secrets; print(secrets.token_urlsafe(64))')\"}" \
+                --query ARN \
+                --output text)"
+            fi
+            AUTH_SECRET_JSON="$(aws secretsmanager get-secret-value \
+              --secret-id "${AUTH_SECRET_ARN}" \
+              --query SecretString \
+              --output text)"
+          fi
+
+          AUTH_SECRET="$(echo "${AUTH_SECRET_JSON}" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("AUTH_SECRET",""))')"
+
+          if [ -z "${AUTH_SECRET}" ]; then
+            echo "AUTH_SECRET missing in secret payload. Generating and storing one."
+            AUTH_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(64))')"
+            aws secretsmanager put-secret-value \
+              --secret-id "${AUTH_SECRET_ARN}" \
+              --secret-string "{\"AUTH_SECRET\":\"${AUTH_SECRET}\"}" >/dev/null
+          fi
+
+          ENV_FILE_CONTENT="$(printf 'NODE_ENV=production\nAUTH_SECRET=%s\nDATABASE_URL=%s\n%s=%s' "${AUTH_SECRET}" "${DB_URL}" "${{ env.APP_DATABASE_URL_KEY }}" "${DB_URL}")"
 
           kubectl create secret generic "${{ env.K8S_ENV_SECRET_NAME }}" \
             -n "${{ env.NAMESPACE }}" \

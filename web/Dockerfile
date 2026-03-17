@@ -40,6 +40,7 @@ RUN npm install -g npm@10.9.2
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV DOTENV_CONFIG_PATH=/app/.env
 
 # Bring full workspace from builder (includes node_modules + built output)
 COPY --from=build /app /app
@@ -48,4 +49,4 @@ COPY --from=build /app /app
 WORKDIR /app/web
 
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+CMD ["node", "-r", "dotenv/config", "./node_modules/next/dist/bin/next", "start"]

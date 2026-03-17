@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from webbrowser import get
 
 from fastapi import APIRouter, FastAPI
 
