@@ -134,5 +134,5 @@ jobs:
             --namespace "${{ env.NAMESPACE }}" --create-namespace \
             --set image.repository="${{ env.IMAGE_REPO }}" \
             --set image.tag="${{ env.IMAGE_TAG }}" \
-            --set service.targetPort=3001 \
+            --set service.targetPort=8000 \
             --set envFile.existingSecretName=python-server-db

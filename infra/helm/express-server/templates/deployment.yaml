@@ -19,10 +19,10 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - containerPort: 3001
+            - containerPort: {{ .Values.service.targetPort }}
           env:
             - name: PORT
-              value: "3001"
+              value: {{ .Values.service.targetPort | quote }}
 
           {{- if .Values.envFile.enabled }}
           volumeMounts:

@@ -9,7 +9,7 @@ replicaCount: 2
 
 service:
   port: 80
-  targetPort: 3002
+  targetPort: 8000
 
 envFile:
   enabled: true
