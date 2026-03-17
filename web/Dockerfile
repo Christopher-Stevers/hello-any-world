@@ -20,6 +20,10 @@ COPY web_utils/src ./web_utils/src
 # Install all workspace dependencies
 RUN npm ci
 
+# npm is not pulling these optional native packages during workspace install.
+# Install the Linux variants explicitly so Next/Tailwind can load them at build time.
+RUN npm install --no-save lightningcss-linux-x64-gnu @tailwindcss/oxide-linux-x64-gnu
+
 # Generate Prisma client for the shared db package before building Next.js.
 RUN npm --workspace @repo/web_db run generate
 
