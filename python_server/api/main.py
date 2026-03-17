@@ -4,11 +4,13 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
+from dotenv import load_dotenv
 
 from python_db.python_db.database import check_connection
 from python_utils.python_utils.helpers import get_env_bool
 
 # Prefer the in-repo python_db (python_db/python_db) when run without pip install -e.
+load_dotenv("/app/.env")
 
 
 @asynccontextmanager

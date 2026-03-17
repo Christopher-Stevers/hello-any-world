@@ -30,8 +30,10 @@ def _get_database_url() -> str:
         raise RuntimeError(
             "Set PYTHON_DATABASE_URL, DATABASE_URL_PYTHON, or DATABASE_URL"
         )
+    if url.startswith("postgresql+psycopg://"):
+        url = url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
     if url.startswith("postgresql://") and "+" not in url.split("://")[0]:
-        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
     return url
 
 

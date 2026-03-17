@@ -6,9 +6,20 @@ from typing import Generator
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL_PYTHON",
-    "postgresql+psycopg://postgres:postgres@localhost:5434/genghis",
+
+def _normalize_database_url(url: str) -> str:
+    if url.startswith("postgresql+psycopg://"):
+        return url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    if url.startswith("postgresql://") and "+" not in url.split("://", 1)[0]:
+        return url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return url
+
+
+DATABASE_URL = _normalize_database_url(
+    os.getenv(
+        "DATABASE_URL_PYTHON",
+        "postgresql+psycopg2://postgres:postgres@localhost:5434/genghis",
+    )
 )
 
 
