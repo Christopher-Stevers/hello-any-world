@@ -113,7 +113,17 @@ export class EksStack extends cdk.Stack {
       {
         username: config.postgres.python.username,
       }
+		);
+
+    // Service-owned Nextjs DB credentials (for nextjs_user)
+    const nextjsDbCredentialsSecret = new rds.DatabaseSecret(
+      this,
+      "NextjsDbCredentialsSecret",
+      {
+        username: config.postgres.nextjs.username,
+      }
     );
+
 
     // Lambda-backed custom resource: idempotent bootstrap for express_db + express_user grants
     const expressBootstrapFn = new lambdaNodejs.NodejsFunction(
@@ -171,21 +181,58 @@ export class EksStack extends cdk.Stack {
           nodeModules: ["pg"],
         },
       }
-    );
+		);
 
+    const nextJsBootstrapFn= new lambdaNodejs.NodejsFunction(
+      this,
+      "NextjsDbBootstrapFn",
+      {
+        runtime: lambda.Runtime.NODEJS_20_X,
+        entry: path.join(
+          process.cwd(),
+          "lib",
+          "lambda",
+          "nextjs-db-bootstrap.ts"
+        ),
+        handler: "handler",
+        timeout: cdk.Duration.minutes(2),
+        memorySize: 256,
+        vpc,
+        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [bootstrapLambdaSg],
+        bundling: {
+          target: "node20",
+          format: lambdaNodejs.OutputFormat.CJS,
+          minify: true,
+          sourceMap: false,
+          externalModules: ["@aws-sdk/*"],
+          nodeModules: ["pg"],
+        },
+      }
+		);
     dbCredentialsSecret.grantRead(expressBootstrapFn);
     expressDbCredentialsSecret.grantRead(expressBootstrapFn);
 
     dbCredentialsSecret.grantRead(pythonBootstrapFn);
-    pythonDbCredentialsSecret.grantRead(pythonBootstrapFn);
+		pythonDbCredentialsSecret.grantRead(pythonBootstrapFn);
 
-    const expressBootstrapProvider = new cr.Provider(this, "ExpressDbBootstrapProvider", {
+		dbCredentialsSecret.grantRead(nextJsBootstrapFn);
+		nextjsDbCredentialsSecret.grantRead(nextJsBootstrapFn);
+
+
+		const expressBootstrapProvider = new cr.Provider(this, "ExpressDbBootstrapProvider", {
       onEventHandler: expressBootstrapFn,
     });
 
     const pythonBootstrapProvider = new cr.Provider(this, "PythonDbBootstrapProvider", {
       onEventHandler: pythonBootstrapFn,
+		});
+
+
+    const nextJsBootstrapProvider = new cr.Provider(this, "NextJsDbBootstrapProvider", {
+      onEventHandler: nextJsBootstrapFn,
     });
+
 
     const expressDbBootstrap = new cdk.CustomResource(this, "ExpressDbBootstrap", {
       serviceToken: expressBootstrapProvider.serviceToken,
@@ -214,6 +261,22 @@ export class EksStack extends cdk.Stack {
     });
     pythonDbBootstrap.node.addDependency(db);
     pythonDbBootstrap.node.addDependency(pythonDbCredentialsSecret);
+
+
+    const nextjsDbBootstrap = new cdk.CustomResource(this, "NextJsDbBootstrap", {
+      serviceToken: nextJsBootstrapProvider.serviceToken,
+      properties: {
+        DbHost: db.dbInstanceEndpointAddress,
+        DbPort: db.dbInstanceEndpointPort,
+        AdminSecretArn: dbCredentialsSecret.secretArn,
+        NextJsSecretArn: nextjsDbCredentialsSecret.secretArn,
+        NextJsDbName: config.postgres.nextjs.dbName,
+        NextJsUsername: config.postgres.nextjs.username,
+      },
+    });
+    nextjsDbBootstrap.node.addDependency(db);
+		nextjsDbBootstrap.node.addDependency(nextjsDbCredentialsSecret);
+
 
     // Express-specific app secret containing DATABASE_URL
     const expressDatabaseUrlSecret = new secretsmanager.Secret(
@@ -255,9 +318,28 @@ export class EksStack extends cdk.Stack {
         removalPolicy: cdk.RemovalPolicy.RETAIN,
       }
     );
-    pythonDatabaseUrlSecret.node.addDependency(pythonDbBootstrap);
+		pythonDatabaseUrlSecret.node.addDependency(pythonDbBootstrap);
 
-    // Managed node group
+		const nextjsDatabaseUrlSecret = new secretsmanager.Secret(
+      this,
+      "nextjsDatabaseUrlSecret",
+      {
+        description:
+          "nextjs application database connection string in DATABASE_URL format",
+        secretObjectValue: {
+          DATABASE_URL: cdk.SecretValue.unsafePlainText(
+            `postgresql://${config.postgres.nextjs.username}:${nextjsDbCredentialsSecret
+              .secretValueFromJson("password")
+              .unsafeUnwrap()}@${db.dbInstanceEndpointAddress}:${
+              db.dbInstanceEndpointPort
+            }/${config.postgres.nextjs.dbName}?sslmode=require`
+          ),
+        },
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
+      }
+    );
+nextjsDatabaseUrlSecret.node.addDependency(nextjsDbBootstrap);
+		// Managed node group
     cluster.addNodegroupCapacity("DefaultNodeGroup", {
       desiredSize: 2,
       minSize: 1,
@@ -339,7 +421,34 @@ PYTHON_DATABASE_URL=${pythonDatabaseUrlSecret
       }
     );
     pythonServerEnvSecretManifest.node.addDependency(appsNamespaceManifest);
-    pythonServerEnvSecretManifest.node.addDependency(pythonDbBootstrap);
+		pythonServerEnvSecretManifest.node.addDependency(pythonDbBootstrap);
+
+		const nextJsServerEnvSecretManifest = new eks.KubernetesManifest(this, "NextJsServerEnvSecret", {
+      cluster,
+      overwrite: true,
+      manifest: [
+        {
+          apiVersion: "v1",
+          kind: "Secret",
+          metadata: {
+            name: config.nextjsDbSecretName,
+            namespace: config.namespace,
+          },
+          type: "Opaque",
+          stringData: {
+            ".env": `NODE_ENV=production
+DATABASE_URL=${nextjsDatabaseUrlSecret
+                .secretValueFromJson("DATABASE_URL")
+                .unsafeUnwrap()}
+NEXTJS_DATABASE_URL=${nextjsDatabaseUrlSecret
+                .secretValueFromJson("DATABASE_URL")
+                .unsafeUnwrap()}`,
+          },
+        },
+      ],
+    });
+    nextJsServerEnvSecretManifest.node.addDependency(appsNamespaceManifest);
+    nextJsServerEnvSecretManifest.node.addDependency(nextjsDbBootstrap);
 
     // --- AWS Load Balancer Controller ---
     const albSa = cluster.addServiceAccount("AwsLbControllerSA", {
@@ -419,9 +528,35 @@ PYTHON_DATABASE_URL=${pythonDatabaseUrlSecret
       })
     );
 
+    // Allow CDK bootstrap version check via SSM parameter
+    ghRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["ssm:GetParameter"],
+        resources: [
+          `arn:${cdk.Stack.of(this).partition}:ssm:${cdk.Stack.of(this).region}:${
+            cdk.Stack.of(this).account
+          }:parameter/cdk-bootstrap/hnb659fds/version`,
+        ],
+      })
+    );
+
+    // Allow GitHub Actions role to assume CDK bootstrap deployment roles
+    ghRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["sts:AssumeRole"],
+        resources: [
+          `arn:${cdk.Stack.of(this).partition}:iam::${cdk.Stack.of(this).account}:role/cdk-hnb659fds-deploy-role-${cdk.Stack.of(this).account}-${cdk.Stack.of(this).region}`,
+          `arn:${cdk.Stack.of(this).partition}:iam::${cdk.Stack.of(this).account}:role/cdk-hnb659fds-file-publishing-role-${cdk.Stack.of(this).account}-${cdk.Stack.of(this).region}`,
+          `arn:${cdk.Stack.of(this).partition}:iam::${cdk.Stack.of(this).account}:role/cdk-hnb659fds-image-publishing-role-${cdk.Stack.of(this).account}-${cdk.Stack.of(this).region}`,
+          `arn:${cdk.Stack.of(this).partition}:iam::${cdk.Stack.of(this).account}:role/cdk-hnb659fds-lookup-role-${cdk.Stack.of(this).account}-${cdk.Stack.of(this).region}`,
+        ],
+      })
+    );
+
     // Optional: allow CI to read DB URL secrets
     expressDatabaseUrlSecret.grantRead(ghRole);
-    pythonDatabaseUrlSecret.grantRead(ghRole);
+		pythonDatabaseUrlSecret.grantRead(ghRole);
+		nextjsDatabaseUrlSecret.grantRead(ghRole)
 
     // Map GitHub role to Kubernetes RBAC (cluster-admin)
     cluster.awsAuth.addRoleMapping(ghRole, {
@@ -449,6 +584,9 @@ PYTHON_DATABASE_URL=${pythonDatabaseUrlSecret
     });
     new cdk.CfnOutput(this, "PythonDatabaseName", {
       value: config.postgres.python.dbName,
+		});
+    new cdk.CfnOutput(this, "NextJsDatabaseName", {
+      value: config.postgres.nextjs.dbName,
     });
 
     new cdk.CfnOutput(this, "DatabaseCredentialsSecretArn", {
@@ -460,6 +598,10 @@ PYTHON_DATABASE_URL=${pythonDatabaseUrlSecret
     });
     new cdk.CfnOutput(this, "PythonDbCredentialsSecretArn", {
       value: pythonDbCredentialsSecret.secretArn,
+		});
+
+    new cdk.CfnOutput(this, "NextJsDbCredentialsSecretArn", {
+      value: nextjsDbCredentialsSecret.secretArn,
     });
 
     new cdk.CfnOutput(this, "ExpressDatabaseUrlSecretArn", {
@@ -468,12 +610,18 @@ PYTHON_DATABASE_URL=${pythonDatabaseUrlSecret
     new cdk.CfnOutput(this, "PythonDatabaseUrlSecretArn", {
       value: pythonDatabaseUrlSecret.secretArn,
     });
+    new cdk.CfnOutput(this, "NextJsDatabaseUrlSecretArn", {
+      value: nextjsDatabaseUrlSecret.secretArn,
+    });
 
     new cdk.CfnOutput(this, "ExpressKubernetesDatabaseSecretName", {
       value: config.expressDbSecretName,
     });
     new cdk.CfnOutput(this, "PythonKubernetesDatabaseSecretName", {
       value: config.pythonDbSecretName,
+		});
+    new cdk.CfnOutput(this, "NextJsKubernetesDatabaseSecretName", {
+      value: config.nextjsDbSecretName,
     });
   }
 }

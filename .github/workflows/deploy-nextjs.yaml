@@ -1,0 +1,186 @@
+name: Deploy Next.js to EKS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/deploy-nextjs.yaml"
+      - "infra/cdk/**"
+      - "infra/helm/nextjs-server/**"
+      - "web/**"
+      - "web_db/**"
+      - "web_utils/**"
+      - "package.json"
+      - "package-lock.json"
+      - "plan.md"
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER_NAME: my-monorepo-eks
+  NAMESPACE: apps
+  RELEASE_NAME: nextjs-server
+  CHART_PATH: infra/helm/nextjs-server
+  ECR_REPO_NAME: hello-express
+  CDK_STACK_NAME: EksStack
+  CDK_WORKDIR: infra/cdk
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Debug GitHub context (pre-OIDC)
+        run: |
+          set -euo pipefail
+          echo "event_name=${{ github.event_name }}"
+          echo "repository=${{ github.repository }}"
+          echo "ref=${{ github.ref }}"
+          echo "ref_name=${{ github.ref_name }}"
+          echo "sha=${{ github.sha }}"
+          echo "actor=${{ github.actor }}"
+          echo "workflow=${{ github.workflow }}"
+          echo "run_id=${{ github.run_id }}"
+          echo "run_attempt=${{ github.run_attempt }}"
+
+      - name: Debug OIDC claims (inline)
+        shell: bash
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "OIDC env vars are missing. Ensure permissions.id-token=write is set at workflow/job level."
+            exit 1
+          fi
+
+          RESP="$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")"
+          TOKEN="$(echo "$RESP" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')"
+
+          if [ -z "${TOKEN:-}" ]; then
+            echo "Failed to obtain OIDC token response:"
+            echo "$RESP"
+            exit 1
+          fi
+
+          PAYLOAD_B64="$(echo "$TOKEN" | cut -d '.' -f2)"
+          PAD=$(( (4 - ${#PAYLOAD_B64} % 4) % 4 ))
+          if [ "$PAD" -gt 0 ]; then
+            PAYLOAD_B64="${PAYLOAD_B64}$(printf '=%.0s' $(seq 1 $PAD))"
+          fi
+
+          PAYLOAD_JSON="$(echo "$PAYLOAD_B64" | tr '_-' '/+' | base64 -d 2>/dev/null || true)"
+          if [ -z "${PAYLOAD_JSON:-}" ]; then
+            echo "Failed to decode JWT payload"
+            exit 1
+          fi
+
+          echo "OIDC payload:"
+          echo "$PAYLOAD_JSON"
+
+          echo "Extracted claims:"
+          echo "$PAYLOAD_JSON" | sed -n 's/.*"aud":"\([^"]*\)".*/aud=\1/p'
+          echo "$PAYLOAD_JSON" | sed -n 's/.*"sub":"\([^"]*\)".*/sub=\1/p'
+          echo "$PAYLOAD_JSON" | sed -n 's/.*"iss":"\([^"]*\)".*/iss=\1/p'
+
+      - name: Configure AWS creds (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::764933859140:role/my-monorepo-eks-github-actions
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-${{ github.run_id }}-${{ github.run_attempt }}
+          mask-aws-account-id: false
+          unset-current-credentials: true
+          disable-retry: true
+
+      - name: Debug caller identity (post-OIDC)
+        run: |
+          set -euo pipefail
+          aws --version
+          aws sts get-caller-identity
+
+      - name: Setup Node for CDK
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            infra/cdk/package-lock.json
+            web/package-lock.json
+
+      - name: Install root dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Install CDK dependencies
+        working-directory: ${{ env.CDK_WORKDIR }}
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Build CDK
+        working-directory: ${{ env.CDK_WORKDIR }}
+        run: |
+          set -euo pipefail
+          npm run build
+
+      - name: Deploy CDK infra (EKS + DB + secrets)
+        working-directory: ${{ env.CDK_WORKDIR }}
+        env:
+          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          npx cdk deploy "${{ env.CDK_STACK_NAME }}" --require-approval never
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE_URI="$ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:$IMAGE_TAG"
+
+          docker build \
+            -f web/Dockerfile \
+            -t "$IMAGE_URI" \
+            .
+
+          docker push "$IMAGE_URI"
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "IMAGE_REPO=$ECR_REGISTRY/${{ env.ECR_REPO_NAME }}" >> $GITHUB_ENV
+
+      - name: Configure kubectl for EKS
+        run: |
+          set -euo pipefail
+          aws eks update-kubeconfig --name "${{ env.CLUSTER_NAME }}" --region "${{ env.AWS_REGION }}"
+          kubectl get nodes
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm upgrade
+        run: |
+          set -euo pipefail
+
+          helm upgrade --install "${{ env.RELEASE_NAME }}" "${{ env.CHART_PATH }}" \
+            --namespace "${{ env.NAMESPACE }}" --create-namespace \
+            --set nameOverride=nextjs-server \
+            --set image.repository="${{ env.IMAGE_REPO }}" \
+            --set image.tag="${{ env.IMAGE_TAG }}" \
+            --set service.targetPort=3000 \
+            --set envFile.existingSecretName=nextjs-server-db

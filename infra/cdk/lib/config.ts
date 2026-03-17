@@ -4,7 +4,8 @@ export const config = {
   ecrRepoName: "hello-express",
   namespace: "apps",
 	expressDbSecretName: "express-server-db",
-  pythonDbSecretName: "python-server-db",
+	pythonDbSecretName: "python-server-db",
+  nextjsDbSecretName: "nextjs-server-db",
   postgres: {
     // Instance-level/admin settings (shared)
     dbName: "postgres",
@@ -24,6 +25,10 @@ export const config = {
 		python: {
       dbName: "python_db",
       username: "python_user",
+    },
+    nextjs: {
+      dbName: "nextjs_db",
+      username: "nextjs_user",
     },
   },
   github: {
