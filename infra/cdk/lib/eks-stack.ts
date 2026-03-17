@@ -269,9 +269,9 @@ export class EksStack extends cdk.Stack {
         DbHost: db.dbInstanceEndpointAddress,
         DbPort: db.dbInstanceEndpointPort,
         AdminSecretArn: dbCredentialsSecret.secretArn,
-        NextJsSecretArn: nextjsDbCredentialsSecret.secretArn,
-        NextJsDbName: config.postgres.nextjs.dbName,
-        NextJsUsername: config.postgres.nextjs.username,
+        NextjsSecretArn: nextjsDbCredentialsSecret.secretArn,
+        NextjsDbName: config.postgres.nextjs.dbName,
+        NextjsUsername: config.postgres.nextjs.username,
       },
     });
     nextjsDbBootstrap.node.addDependency(db);
