@@ -339,6 +339,16 @@ export class EksStack extends cdk.Stack {
       }
     );
 nextjsDatabaseUrlSecret.node.addDependency(nextjsDbBootstrap);
+
+    const nextjsAuthSecret = new secretsmanager.Secret(this, "NextjsAuthSecret", {
+      description: "Next.js application AUTH_SECRET for Auth.js/NextAuth",
+      generateSecretString: {
+        secretStringTemplate: "{}",
+        generateStringKey: "AUTH_SECRET",
+        excludePunctuation: true,
+      },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
 		// Managed node group
     cluster.addNodegroupCapacity("DefaultNodeGroup", {
       desiredSize: 2,
@@ -437,6 +447,7 @@ PYTHON_DATABASE_URL=${pythonDatabaseUrlSecret
           type: "Opaque",
           stringData: {
             ".env": `NODE_ENV=production
+AUTH_SECRET=${nextjsAuthSecret.secretValueFromJson("AUTH_SECRET").unsafeUnwrap()}
 DATABASE_URL=${nextjsDatabaseUrlSecret
                 .secretValueFromJson("DATABASE_URL")
                 .unsafeUnwrap()}
@@ -563,10 +574,34 @@ NEXTJS_DATABASE_URL=${nextjsDatabaseUrlSecret
       })
     );
 
-    // Optional: allow CI to read DB URL secrets
+    // Allow CI to read DB URL secrets
     expressDatabaseUrlSecret.grantRead(ghRole);
 		pythonDatabaseUrlSecret.grantRead(ghRole);
-		nextjsDatabaseUrlSecret.grantRead(ghRole)
+		nextjsDatabaseUrlSecret.grantRead(ghRole);
+    nextjsAuthSecret.grantRead(ghRole);
+    nextjsAuthSecret.grantWrite(ghRole);
+
+    // Allow CI fallback path to create/use a stable named auth secret if stack outputs are missing.
+    ghRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["secretsmanager:CreateSecret"],
+        resources: ["*"],
+      })
+    );
+    ghRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:PutSecretValue",
+        ],
+        resources: [
+          `arn:${cdk.Stack.of(this).partition}:secretsmanager:${cdk.Stack.of(this).region}:${
+            cdk.Stack.of(this).account
+          }:secret:${cdk.Stack.of(this).stackName}-nextjs-auth-secret*`,
+        ],
+      })
+    );
 
     // Map GitHub role to Kubernetes RBAC (cluster-admin)
     cluster.awsAuth.addRoleMapping(ghRole, {
@@ -622,6 +657,9 @@ NEXTJS_DATABASE_URL=${nextjsDatabaseUrlSecret
     });
     new cdk.CfnOutput(this, "NextJsDatabaseUrlSecretArn", {
       value: nextjsDatabaseUrlSecret.secretArn,
+    });
+    new cdk.CfnOutput(this, "NextJsAuthSecretArn", {
+      value: nextjsAuthSecret.secretArn,
     });
 
     new cdk.CfnOutput(this, "ExpressKubernetesDatabaseSecretName", {
