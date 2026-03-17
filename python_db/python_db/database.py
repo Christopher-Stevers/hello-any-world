@@ -15,12 +15,16 @@ def _normalize_database_url(url: str) -> str:
     return url
 
 
-DATABASE_URL = _normalize_database_url(
-    os.getenv(
-        "DATABASE_URL_PYTHON",
-        "postgresql+psycopg2://postgres:postgres@localhost:5434/genghis",
-    )
-)
+def _get_database_url() -> str:
+    url = os.getenv("PYTHON_DATABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "Missing PYTHON_DATABASE_URL from the mounted Kubernetes secret."
+        )
+    return _normalize_database_url(url)
+
+
+DATABASE_URL = _get_database_url()
 
 
 class Base(DeclarativeBase):

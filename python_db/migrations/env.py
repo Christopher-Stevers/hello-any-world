@@ -21,15 +21,9 @@ target_metadata = Base.metadata
 
 
 def _get_database_url() -> str:
-    url = (
-        os.environ.get("PYTHON_DATABASE_URL")
-        or os.environ.get("DATABASE_URL_PYTHON")
-        or os.environ.get("DATABASE_URL")
-    )
+    url = os.environ.get("PYTHON_DATABASE_URL")
     if not url:
-        raise RuntimeError(
-            "Set PYTHON_DATABASE_URL, DATABASE_URL_PYTHON, or DATABASE_URL"
-        )
+        raise RuntimeError("Set PYTHON_DATABASE_URL")
     if url.startswith("postgresql+psycopg://"):
         url = url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
     if url.startswith("postgresql://") and "+" not in url.split("://")[0]:

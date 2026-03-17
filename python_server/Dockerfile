@@ -28,8 +28,5 @@ COPY python_utils /app/python_utils
 
 EXPOSE 8000
 
-# Optional runtime env vars (override at deploy time)
-ENV DATABASE_URL_PYTHON=postgresql+psycopg2://postgres:postgres@python-db:5432/genghis
-
 # Start FastAPI with Uvicorn
 CMD ["python", "-m", "uvicorn", "python_server.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

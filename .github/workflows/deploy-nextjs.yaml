@@ -31,7 +31,7 @@ env:
   AUTH_SECRET_OUTPUT_KEY: NextJsAuthSecretArn
   AUTH_SECRET_FALLBACK_NAME: nextjs-auth-secret
   K8S_ENV_SECRET_NAME: nextjs-server-db
-  APP_DATABASE_URL_KEY: NEXTJS_DATABASE_URL
+  APP_DATABASE_URL_KEY: DATABASE_URL_WEB
 
 jobs:
   deploy:
@@ -221,7 +221,7 @@ jobs:
               --secret-string "{\"AUTH_SECRET\":\"${AUTH_SECRET}\"}" >/dev/null
           fi
 
-          ENV_FILE_CONTENT="$(printf 'NODE_ENV=production\nAUTH_SECRET=%s\nDATABASE_URL=%s\n%s=%s' "${AUTH_SECRET}" "${DB_URL}" "${{ env.APP_DATABASE_URL_KEY }}" "${DB_URL}")"
+          ENV_FILE_CONTENT="$(printf 'NODE_ENV=production\nAUTH_SECRET=%s\n%s=%s' "${AUTH_SECRET}" "${{ env.APP_DATABASE_URL_KEY }}" "${DB_URL}")"
 
           kubectl create secret generic "${{ env.K8S_ENV_SECRET_NAME }}" \
             -n "${{ env.NAMESPACE }}" \

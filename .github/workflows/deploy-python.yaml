@@ -19,7 +19,6 @@ env:
   ECR_REPO_NAME: hello-express
   DB_URL_SECRET_OUTPUT_KEY: PythonDatabaseUrlSecretArn
   K8S_ENV_SECRET_NAME: python-server-db
-  APP_DATABASE_URL_KEY: PYTHON_DATABASE_URL
 
 jobs:
   deploy:
@@ -155,7 +154,7 @@ jobs:
             exit 1
           fi
 
-          ENV_FILE_CONTENT="$(printf 'NODE_ENV=production\nDATABASE_URL=%s\n%s=%s' "${DB_URL}" "${{ env.APP_DATABASE_URL_KEY }}" "${DB_URL}")"
+          ENV_FILE_CONTENT="$(printf 'NODE_ENV=production\nPYTHON_DATABASE_URL=%s' "${DB_URL}")"
 
           kubectl create secret generic "${{ env.K8S_ENV_SECRET_NAME }}" \
             -n "${{ env.NAMESPACE }}" \
