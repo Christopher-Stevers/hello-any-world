@@ -528,6 +528,16 @@ NEXTJS_DATABASE_URL=${nextjsDatabaseUrlSecret
       })
     );
 
+    // Allow CI workflows to read stack outputs used during app secret reconciliation.
+    ghRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["cloudformation:DescribeStacks"],
+        resources: [
+          `arn:${cdk.Stack.of(this).partition}:cloudformation:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:stack/${cdk.Stack.of(this).stackName}/*`,
+        ],
+      })
+    );
+
     // Allow CDK bootstrap version check via SSM parameter
     ghRole.addToPolicy(
       new iam.PolicyStatement({
