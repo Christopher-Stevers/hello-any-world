@@ -21,11 +21,15 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
+  CFN_STACK_NAME: EksStack
   CLUSTER_NAME: my-monorepo-eks
   NAMESPACE: apps
   RELEASE_NAME: nextjs-server
   CHART_PATH: infra/helm/nextjs-server
   ECR_REPO_NAME: hello-express
+  DB_URL_SECRET_OUTPUT_KEY: NextJsDatabaseUrlSecretArn
+  K8S_ENV_SECRET_NAME: nextjs-server-db
+  APP_DATABASE_URL_KEY: NEXTJS_DATABASE_URL
 
 jobs:
   deploy:
@@ -135,6 +139,38 @@ jobs:
 
       - name: Setup Helm
         uses: azure/setup-helm@v4
+
+      - name: Reconcile app env secret from IaC outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SECRET_ARN="$(aws cloudformation describe-stacks \
+            --stack-name "${{ env.CFN_STACK_NAME }}" \
+            --query "Stacks[0].Outputs[?OutputKey=='${{ env.DB_URL_SECRET_OUTPUT_KEY }}'].OutputValue | [0]" \
+            --output text)"
+
+          if [ -z "${SECRET_ARN}" ] || [ "${SECRET_ARN}" = "None" ]; then
+            echo "Could not resolve secret ARN from CloudFormation output key: ${{ env.DB_URL_SECRET_OUTPUT_KEY }}"
+            exit 1
+          fi
+
+          DB_URL="$(aws secretsmanager get-secret-value \
+            --secret-id "${SECRET_ARN}" \
+            --query SecretString \
+            --output text | python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["DATABASE_URL"])')"
+
+          if [ -z "${DB_URL}" ]; then
+            echo "DATABASE_URL is empty in secret: ${SECRET_ARN}"
+            exit 1
+          fi
+
+          ENV_FILE_CONTENT="$(printf 'NODE_ENV=production\nDATABASE_URL=%s\n%s=%s' "${DB_URL}" "${{ env.APP_DATABASE_URL_KEY }}" "${DB_URL}")"
+
+          kubectl create secret generic "${{ env.K8S_ENV_SECRET_NAME }}" \
+            -n "${{ env.NAMESPACE }}" \
+            --from-literal=.env="${ENV_FILE_CONTENT}" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Helm upgrade
         run: |
